@@ -112,9 +112,11 @@ func NewServerHandlerTransport(w http.ResponseWriter, r *http.Request, stats []s
 // using the net/http.Handler interface. This http.Handler is guaranteed
 // at this point to be speaking over HTTP/2, so it's able to speak valid
 // gRPC.
+// ~可能是基于http1实现的transport，可能是借助go原生http的基础。仅仅这么说不能理解，需要更深入看具体实现
+// ~不是grpc默认使用的实现
 type serverHandlerTransport struct {
 	rw         http.ResponseWriter
-	req        *http.Request
+	req        *http.Request //server端从这里面获取client传过来的ctx
 	timeoutSet bool
 	timeout    time.Duration
 
@@ -326,6 +328,8 @@ func (ht *serverHandlerTransport) WriteHeader(s *Stream, md metadata.MD) error {
 	return err
 }
 
+//这里没有帧头，就是普通的http？
+//数据被封装再stream里面等待处理
 func (ht *serverHandlerTransport) HandleStreams(startStream func(*Stream), traceCtx func(context.Context, string) context.Context) {
 	// With this transport type there will be exactly 1 stream: this HTTP request.
 

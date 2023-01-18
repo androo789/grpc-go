@@ -359,7 +359,8 @@ func (w *bufWriter) Flush() error {
 
 type framer struct {
 	writer *bufWriter
-	fr     *http2.Framer
+	//基于go原生的http2的封装
+	fr *http2.Framer
 }
 
 func newFramer(conn net.Conn, writeBufferSize, readBufferSize int, maxHeaderListSize uint32) *framer {

@@ -71,6 +71,8 @@ var registeredCompressor = make(map[string]Compressor)
 // NOTE: this function must only be called during initialization time (i.e. in
 // an init() function), and is not thread-safe.  If multiple Compressors are
 // registered with the same name, the one registered last will take effect.
+
+//~ 解码这边的也算接触过了
 func RegisterCompressor(c Compressor) {
 	registeredCompressor[c.Name()] = c
 }

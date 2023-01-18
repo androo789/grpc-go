@@ -167,6 +167,8 @@ func NewClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, meth
 }
 
 func newClientStream(ctx context.Context, desc *StreamDesc, cc *ClientConn, method string, opts ...CallOption) (_ ClientStream, err error) {
+	//~ 前面已经构造好了发出去的mada，这里从ctx里面取出来，想想也是，不可能直接对ctx做序列化，二进制化吧，肯定是对里面的要传递的数据取出来处理
+	// 终于想明白了
 	if md, _, ok := metadata.FromOutgoingContextRaw(ctx); ok {
 		if err := imetadata.Validate(md); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
@@ -244,6 +246,7 @@ func newClientStreamWithParams(ctx context.Context, desc *StreamDesc, cc *Client
 	}()
 
 	for _, o := range opts {
+		//没关系就看before
 		if err := o.before(c); err != nil {
 			return nil, toRPCErr(err)
 		}
@@ -366,6 +369,7 @@ func (cs *clientStream) newAttemptLocked(isTransparent bool) (*csAttempt, error)
 		return nil, ErrClientConnClosing
 	}
 
+	//塞了一堆key-value进去
 	ctx := newContextWithRPCInfo(cs.ctx, cs.callInfo.failFast, cs.callInfo.codec, cs.cp, cs.comp)
 	method := cs.callHdr.Method
 	var beginTime time.Time
@@ -408,7 +412,7 @@ func (cs *clientStream) newAttemptLocked(isTransparent bool) (*csAttempt, error)
 	}
 
 	return &csAttempt{
-		ctx:           ctx,
+		ctx:           ctx, //~ 然后把调用方应用层的ctx传递到了这里
 		beginTime:     beginTime,
 		cs:            cs,
 		dc:            cs.cc.dopts.dc,
@@ -476,6 +480,7 @@ type clientStream struct {
 
 	methodConfig *MethodConfig
 
+	//~ client端的应用层的ctx实际传递到了这里，看看怎么网络传输的
 	ctx context.Context // the application's context, wrapped by stats/tracing
 
 	retryThrottler *retryThrottler // The throttler active when the RPC began.
@@ -530,7 +535,7 @@ type csAttempt struct {
 	// and cleared when the finish method is called.
 	trInfo *traceInfo
 
-	statsHandlers []stats.Handler
+	statsHandlers []stats.Handler //这里应该是统计相关的，我没仔细看
 	beginTime     time.Time
 
 	// set for newStream errors that may be transparently retried

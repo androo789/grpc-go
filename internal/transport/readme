@@ -1,0 +1,3 @@
+http2Server是基于http2实现的ServerTransport接口
+serverHandlerTransport也是实现了ServerTransport接口
+但是有什么区别

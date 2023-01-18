@@ -672,8 +672,10 @@ type ClientTransport interface {
 //
 // Methods may be called concurrently from multiple goroutines, but
 // Write methods for a given Stream will be called serially.
+// ~ http有http的transport，grpc有grpc的transport，真是牛逼
 type ServerTransport interface {
 	// HandleStreams receives incoming streams using the given handler.
+	// ~处理一次请求
 	HandleStreams(func(*Stream), func(context.Context, string) context.Context)
 
 	// WriteHeader sends the header metadata for the given stream.
@@ -682,6 +684,7 @@ type ServerTransport interface {
 
 	// Write sends the data for the given stream.
 	// Write may not be called on all streams.
+	// ~ 写返回值
 	Write(s *Stream, hdr []byte, data []byte, opts *Options) error
 
 	// WriteStatus sends the status of a stream to the client.  WriteStatus is
