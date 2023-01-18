@@ -63,6 +63,7 @@ var (
 var serverConnectionCounter uint64
 
 // http2Server implements the ServerTransport interface with HTTP2.
+// ~基于http2实现transport。  grpc使用的这个实现，而不是另一个实现
 type http2Server struct {
 	lastRead    int64 // Keep this field 64-bit aligned. Accessed atomically.
 	ctx         context.Context
@@ -243,6 +244,9 @@ func NewServerTransport(conn net.Conn, config *ServerConfig) (_ ServerTransport,
 
 	done := make(chan struct{})
 	t := &http2Server{
+		//~ 仅仅是把conn作为key-value存入了ctx，这里就是用了出的background的
+		// 那么gocommon是怎么传递ctx中的东西的？我猜是客户端set了http2的header。而不是当做一块单独的二进制，再服务端由解析处理
+		// ==。有问题就算client传递了，这里没地方解析啊？
 		ctx:               setConnection(context.Background(), rawConn),
 		done:              done,
 		conn:              conn,
@@ -393,6 +397,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 		timeout    time.Duration
 	)
 
+	//遍历http2的header
 	for _, hf := range frame.Fields {
 		switch hf.Name {
 		case "content-type":
@@ -400,6 +405,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 			if !validContentType {
 				break
 			}
+			//~ 应该不是这里，不是content-type
 			mdata[hf.Name] = append(mdata[hf.Name], hf.Value)
 			s.contentSubtype = contentSubtype
 			isGRPC = true
@@ -432,6 +438,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 				logger.Warningf("Failed to decode metadata header (%q, %q): %v", hf.Name, hf.Value, err)
 				break
 			}
+			//~ 应该是这里，，获取到client发送的ctx中的mata信息
 			mdata[hf.Name] = append(mdata[hf.Name], v)
 		}
 	}
@@ -483,6 +490,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 		// s is just created by the caller. No lock needed.
 		s.state = streamReadDone
 	}
+	//~ stream的ctx来自transport的ctx
 	if timeoutSet {
 		s.ctx, s.cancel = context.WithTimeout(t.ctx, timeout)
 	} else {
@@ -491,6 +499,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 
 	// Attach the received metadata to the context.
 	if len(mdata) > 0 {
+		//~ 应该是这里，将   获取到client发送的ctx中的mata信息  存入ctx
 		s.ctx = metadata.NewIncomingContext(s.ctx, mdata)
 		if statsTags := mdata["grpc-tags-bin"]; len(statsTags) > 0 {
 			s.ctx = stats.SetIncomingTags(s.ctx, []byte(statsTags[len(statsTags)-1]))
@@ -603,6 +612,7 @@ func (t *http2Server) operateHeaders(frame *http2.MetaHeadersFrame, handle func(
 // HandleStreams receives incoming streams using the given handler. This is
 // typically run in a separate goroutine.
 // traceCtx attaches trace to ctx and returns the new context.
+// http2的实现处理stream的方法就是根据帧头来弄的
 func (t *http2Server) HandleStreams(handle func(*Stream), traceCtx func(context.Context, string) context.Context) {
 	defer close(t.readerDone)
 	for {
@@ -639,6 +649,8 @@ func (t *http2Server) HandleStreams(handle func(*Stream), traceCtx func(context.
 			t.Close()
 			return
 		}
+
+		// ~ 处理不同的帧
 		switch frame := frame.(type) {
 		case *http2.MetaHeadersFrame:
 			if t.operateHeaders(frame, handle, traceCtx) {

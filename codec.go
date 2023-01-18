@@ -31,6 +31,7 @@ type baseCodec interface {
 	Unmarshal(data []byte, v interface{}) error
 }
 
+//~ 神奇了，不光struct能验证是否实现了接口，interface也能验证
 var _ baseCodec = Codec(nil)
 var _ baseCodec = encoding.Codec(nil)
 

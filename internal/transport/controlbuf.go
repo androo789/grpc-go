@@ -459,6 +459,7 @@ const (
 // thereby closely resemebling to a round-robin scheduling over all streams. While
 // processing a stream, loopy writes out data bytes from this stream capped by the min
 // of http2MaxFrameLen, connection-level flow control and stream-level flow control.
+// ~我草这么牛逼，我还没看
 type loopyWriter struct {
 	side      side
 	cbuf      *controlBuffer

@@ -44,6 +44,7 @@ func init() {
 	c.poolCompressor.New = func() interface{} {
 		return &writer{Writer: gzip.NewWriter(ioutil.Discard), pool: &c.poolCompressor}
 	}
+	//为什么看起来只有gzip一种压缩算法
 	encoding.RegisterCompressor(c)
 }
 

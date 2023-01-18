@@ -530,6 +530,7 @@ func (t *http2Client) createHeaderFields(ctx context.Context, callHdr *CallHdr) 
 		headerFields = append(headerFields, hpack.HeaderField{Name: "grpc-trace-bin", Value: encodeBinHeader(b)})
 	}
 
+	//从ctx中取出要传递的数据
 	if md, added, ok := metadata.FromOutgoingContextRaw(ctx); ok {
 		var k string
 		for k, vv := range md {

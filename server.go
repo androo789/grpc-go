@@ -129,10 +129,11 @@ type Server struct {
 	// conns contains all active server transports. It is a map keyed on a
 	// listener address with the value being the set of active transports
 	// belonging to that listener.
-	conns    map[string]map[transport.ServerTransport]bool
-	serve    bool
-	drain    bool
-	cv       *sync.Cond              // signaled when connections close for GracefulStop
+	conns map[string]map[transport.ServerTransport]bool
+	serve bool
+	drain bool
+	cv    *sync.Cond // signaled when connections close for GracefulStop
+	//保存了用各种业务定义的方法
 	services map[string]*serviceInfo // service name -> service info
 	events   trace.EventLog
 
@@ -152,7 +153,7 @@ type serverOptions struct {
 	codec                 baseCodec
 	cp                    Compressor
 	dc                    Decompressor
-	unaryInt              UnaryServerInterceptor
+	unaryInt              UnaryServerInterceptor //可能插件就是这里配置的，不确定再看看
 	streamInt             StreamServerInterceptor
 	chainUnaryInts        []UnaryServerInterceptor
 	chainStreamInts       []StreamServerInterceptor
@@ -588,6 +589,7 @@ func (s *Server) stopServerWorkers() {
 
 // NewServer creates a gRPC server which has no service registered and has not
 // started to accept requests yet.
+// 启动一个server
 func NewServer(opt ...ServerOption) *Server {
 	opts := defaultServerOptions
 	for _, o := range extraServerOptions {
@@ -654,6 +656,7 @@ type ServiceRegistrar interface {
 // server. It is called from the IDL generated code. This must be called before
 // invoking Serve. If ss is non-nil (for legacy code), its type is checked to
 // ensure it implements sd.HandlerType.
+//就是注册各种业务定义的方法
 func (s *Server) RegisterService(sd *ServiceDesc, ss interface{}) {
 	if ss != nil {
 		ht := reflect.TypeOf(sd.HandlerType).Elem()
@@ -683,10 +686,12 @@ func (s *Server) register(sd *ServiceDesc, ss interface{}) {
 	}
 	for i := range sd.Methods {
 		d := &sd.Methods[i]
+		//普通的业务方法
 		info.methods[d.MethodName] = d
 	}
 	for i := range sd.Streams {
 		d := &sd.Streams[i]
+		//流式的方法
 		info.streams[d.StreamName] = d
 	}
 	s.services[sd.ServiceName] = info
@@ -766,7 +771,9 @@ func (l *listenSocket) Close() error {
 // read gRPC requests and then call the registered handlers to reply to them.
 // Serve returns when lis.Accept fails with fatal errors.  lis will be closed when
 // this method returns.
-// Serve will return a non-nil error unless Stop or GracefulStop is called.
+// Serve will return a non-nil error unless Stop or GracefulStop is called.、
+// ~就是就是server启动的日志，go-common就是封装调用了这里
+// ~本质就是一个start
 func (s *Server) Serve(lis net.Listener) error {
 	s.mu.Lock()
 	s.printf("serving")
@@ -810,6 +817,13 @@ func (s *Server) Serve(lis net.Listener) error {
 
 	var tempDelay time.Duration // how long to sleep on accept failure
 	for {
+		// 启动了以后就 死循环等到请求
+		//~ 假设lis是基于tcp的，那么这里就算是复用了tcp链接了。用一个tcp不停接收消息？
+		//那么是不是一个server端启动了，那就只有一个tcp？应该是每一个客户端链接过来，都新建一个tcp，复用tcp。
+		//但是都在这里 接收请求
+		//http1 keep-alive的已经复用tcp了，但是tcp中的请求要排队一个个来。http2更进一步，不用排队，多个请求并行发送
+		//这个不用排队的实现方式是，将请求的数据拆分独立帧，在服务端再拼接，就好像是多个请求同时发送一样。
+		//by the way，http2的二进制格式比http1的文本格式空间更小
 		rawConn, err := lis.Accept()
 		if err != nil {
 			if ne, ok := err.(interface {
@@ -852,6 +866,7 @@ func (s *Server) Serve(lis net.Listener) error {
 		// s.conns before this conn can be added.
 		s.serveWG.Add(1)
 		go func() {
+			//~ 来一个请求，就go出去处理
 			s.handleRawConn(lis.Addr().String(), rawConn)
 			s.serveWG.Done()
 		}()
@@ -868,6 +883,7 @@ func (s *Server) handleRawConn(lisAddr string, rawConn net.Conn) {
 	rawConn.SetDeadline(time.Now().Add(s.opts.connectionTimeout))
 
 	// Finish handshaking (HTTP2)
+	//~ new一个transort，transort的是一层封装
 	st := s.newHTTP2Transport(rawConn)
 	rawConn.SetDeadline(time.Time{})
 	if st == nil {
@@ -878,6 +894,7 @@ func (s *Server) handleRawConn(lisAddr string, rawConn net.Conn) {
 		return
 	}
 	go func() {
+		// ~正式处理
 		s.serveStreams(st)
 		s.removeConn(lisAddr, st)
 	}()
@@ -894,6 +911,7 @@ func (s *Server) drainServerTransports(addr string) {
 
 // newHTTP2Transport sets up a http/2 transport (using the
 // gRPC http2 server transport in transport/http2_server.go).
+// ~ ServerTransport我理解为一种请求数据流的封装，
 func (s *Server) newHTTP2Transport(c net.Conn) transport.ServerTransport {
 	config := &transport.ServerConfig{
 		MaxStreams:            s.opts.maxConcurrentStreams,
@@ -932,10 +950,12 @@ func (s *Server) newHTTP2Transport(c net.Conn) transport.ServerTransport {
 }
 
 func (s *Server) serveStreams(st transport.ServerTransport) {
+	// ~ 为什么要关这个st？http2链接是复用的，但是每次请求用完就关？
 	defer st.Close()
 	var wg sync.WaitGroup
 
 	var roundRobinCounter uint32
+	// ~ 参数是函数，直接定义函数， 匿名函数
 	st.HandleStreams(func(stream *transport.Stream) {
 		wg.Add(1)
 		if s.opts.numServerWorkers > 0 {
@@ -945,6 +965,7 @@ func (s *Server) serveStreams(st transport.ServerTransport) {
 			default:
 				// If all stream workers are busy, fallback to the default code path.
 				go func() {
+					// ~ 实际处理
 					s.handleStream(st, stream, s.traceInfo(st, stream))
 					wg.Done()
 				}()
@@ -1093,11 +1114,13 @@ func (s *Server) incrCallsFailed() {
 }
 
 func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Stream, msg interface{}, cp Compressor, opts *transport.Options, comp encoding.Compressor) error {
+	//~ 解码返回值？？
 	data, err := encode(s.getCodec(stream.ContentSubtype()), msg)
 	if err != nil {
 		channelz.Error(logger, s.channelzID, "grpc: server failed to encode response: ", err)
 		return err
 	}
+	//~ 压缩返回值
 	compData, err := compress(data, cp, comp)
 	if err != nil {
 		channelz.Error(logger, s.channelzID, "grpc: server failed to compress response: ", err)
@@ -1108,6 +1131,8 @@ func (s *Server) sendResponse(t transport.ServerTransport, stream *transport.Str
 	if len(payload) > s.opts.maxSendMessageSize {
 		return status.Errorf(codes.ResourceExhausted, "grpc: trying to send message larger than max (%d vs. %d)", len(payload), s.opts.maxSendMessageSize)
 	}
+
+	//写入返回的业务数据
 	err = t.Write(stream, hdr, payload, opts)
 	if err == nil {
 		for _, sh := range s.opts.statsHandlers {
@@ -1138,6 +1163,7 @@ func chainUnaryServerInterceptors(s *Server) {
 	s.opts.unaryInt = chainedInt
 }
 
+// 这一堆函数传递来传递去的太绕了。根本就看不清晰
 func chainUnaryInterceptors(interceptors []UnaryServerInterceptor) UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *UnaryServerInfo, handler UnaryHandler) (interface{}, error) {
 		// the struct ensures the variables are allocated together, rather than separately, since we
@@ -1281,6 +1307,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	if len(shs) != 0 || binlog != nil {
 		payInfo = &payloadInfo{}
 	}
+	//~接收并且解压缩，返回值就是二进制数据
 	d, err := recvAndDecompress(&parser{r: stream}, stream, dc, s.opts.maxReceiveMessageSize, payInfo, decomp)
 	if err != nil {
 		if e := t.WriteStatus(stream, status.Convert(err)); e != nil {
@@ -1291,6 +1318,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	if channelz.IsOn() {
 		t.IncrMsgRecv()
 	}
+	//~df里面包含了真正要处理的byte
 	df := func(v interface{}) error {
 		if err := s.getCodec(stream.ContentSubtype()).Unmarshal(d, v); err != nil {
 			return status.Errorf(codes.Internal, "grpc: error unmarshalling request: %v", err)
@@ -1314,8 +1342,11 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		}
 		return nil
 	}
+	//~ 这里简单就是把stream作为 value存入ctx，这时需要看stream的ctx怎么来的
 	ctx := NewContextWithServerTransportStream(stream.Context(), stream)
+	//~ 调用业务方法，返回的reply就是业务方法函数的数据。
 	reply, appErr := md.Handler(info.serviceImpl, ctx, df, s.opts.unaryInt)
+	//如果报错
 	if appErr != nil {
 		appStatus, ok := status.FromError(appErr)
 		if !ok {
@@ -1350,7 +1381,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 		trInfo.tr.LazyLog(stringer("OK"), false)
 	}
 	opts := &transport.Options{Last: true}
-
+	//~ 封装返回值
 	if err := s.sendResponse(t, stream, reply, cp, opts, comp); err != nil {
 		if err == io.EOF {
 			// The entire stream is done (for unary RPC only).
@@ -1398,6 +1429,7 @@ func (s *Server) processUnaryRPC(t transport.ServerTransport, stream *transport.
 	// TODO: Should we be logging if writing status failed here, like above?
 	// Should the logging be in WriteStatus?  Should we ignore the WriteStatus
 	// error or allow the stats handler to see it?
+	//~ 写返回值，前面已经写了具体的业务返回值数据，这个补充了http的头
 	err = t.WriteStatus(stream, statusOK)
 	if binlog != nil {
 		binlog.Log(&binarylog.ServerTrailer{
@@ -1656,6 +1688,7 @@ func (s *Server) handleStream(t transport.ServerTransport, stream *transport.Str
 	srv, knownService := s.services[service]
 	if knownService {
 		if md, ok := srv.methods[method]; ok {
+			// ~ 单次请求，也是一元请求，只看这个就可以，一般业务方法就是这个
 			s.processUnaryRPC(t, stream, srv, md, trInfo)
 			return
 		}
